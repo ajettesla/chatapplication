@@ -198,9 +198,11 @@ while(1){
     if(FD_ISSET(mastersocketfd, &readfds)){
       int *csocketfd = new int;
       if(*ipstatus == 1){
-      *csocketfd = accept(mastersocketfd, (struct sockaddr*)&clientAddr, &clientlen);}
+      *csocketfd = accept(mastersocketfd, (struct sockaddr*)&clientAddr, &clientlen);
+      printIP(&clientAddr);}
       else if(*ipstatus == 2){
       *csocketfd = accept(mastersocketfd, (struct sockaddr*)&clientAddr6, &clientlen6);
+      printIP(&clientAddr6);
       }
       if(*csocketfd < 0){perror("error with accept system call");exit(1);}
       clientDataStruct *client = new clientDataStruct;
@@ -212,7 +214,6 @@ while(1){
       pthread_mutex_lock(&arr);
       setclientfd(*csocketfd);
       pthread_mutex_unlock(&arr);
-
       pthread_mutex_lock(&vect);
       clientDataVector.push_back(client);
       pthread_mutex_unlock(&vect);
@@ -243,62 +244,81 @@ while(1){
 void *commCallback(void *sock){
     int soc = *(int*)sock;
     delete sock;
-    clientDataStruct *client;
+    clientDataStruct *client = nullptr;
     pthread_mutex_lock(&vect);
     for(int i=0; i< clientDataVector.size(); i++){
+      if(clientDataVector[i] != nullptr){
       if(clientDataVector[i]->csockefd == soc){
         client = clientDataVector[i];
         break;
-      }
+      }}
     }
     pthread_mutex_unlock(&vect);
+    if(client == nullptr){return nullptr;}
     std::string nickName = client->nickName;
     char recvbuffer[300];
     int sent_recv_bytes = recv(soc, recvbuffer, sizeof(recvbuffer),0);
     if(sent_recv_bytes < 0){perror("error with recv function 1");exit(1);}
     if(strncmp(recvbuffer,"\nTERMINATE1.0",13) == 0){
-    std::cout << "TERMINATE IS RECEIVED\n";
-    char ok[] = "ok";
-    int sent_recv_bytes = send(soc, ok,sizeof(ok),0);
-    if(sent_recv_bytes < 0){perror("error with send");exit(1);}
-    removeclientfd(soc);
-    socketque.push(soc);
+    std::cout << "client left" << std::endl;
     clientid--;
+    std::cout << clientid << std::endl;
+    pthread_mutex_lock(&arr);
+    removeclientfd(soc);
+    pthread_mutex_unlock(&arr);
     sleep(1);
     close(soc);
-    pthread_exit(0);}
-    std::string temp(recvbuffer);
+    }
+    else{
+    std::vector<std::string> te = split(recvbuffer, " ");
+    if(te[0] != "MSG"){
+      char error[] = "ERROR\n";
+      int sent_recv_bytes = send(soc,error, sizeof(error),0);
+      if(sent_recv_bytes < 0){perror("error with send");fflush(stderr);(1);}}
+    else{
+    char substring[strlen(recvbuffer) + 4];
+    strcpy(substring, recvbuffer + 3);
+    snprintf(recvbuffer,sizeof(recvbuffer), "MSG %s %s",nickName.c_str(), substring);
     clientSendStruct *data =  new clientSendStruct;
-    temp = nickName + ": " + temp;
+    std::string temp(recvbuffer);
     data->message = temp;
     data->csocket = soc;
     if(clientid > 1){
     pthread_mutex_lock(&qu);
     queu.push(data);
     pthread_cond_signal(&cv);
-    pthread_mutex_unlock(&qu);}
+    pthread_mutex_unlock(&qu);}}}
   return nullptr;
 }
 
 void intialsetup(int socket_t){
-  char testbuffer[] = "HELLO 1.0\n";
+  char testbuffer[] = "HELLO 1\n";
+  std::cout << "Server protocol HELLO 1" << std::endl;
   int sent_recv_bytes = send(socket_t,testbuffer, sizeof(testbuffer), 0);
   if(sent_recv_bytes < 0){perror("error with send fucntion 1");exit(1);}
-  char recvNickname[17];
+  char recvNickname[19];
 
   int sent_recv_byte = recv(socket_t, recvNickname,sizeof(recvNickname),0);
   if(sent_recv_byte < 0){perror("error with recv function 2");exit(1);}
-  if(sent_recv_byte > 15){
+  if(sent_recv_byte > 19){
+    while(1){
     char errormes[] = "ERROR\n";
     sent_recv_bytes = send(socket_t, errormes, sizeof(errormes),0);
-    if(sent_recv_bytes < 0){perror("error with send ");exit(1); }}
+    if(sent_recv_bytes < 0){perror("error with send ");exit(1); }
+     int sent_recv_byte = recv(socket_t, recvNickname,sizeof(recvNickname),0);
+     if(sent_recv_byte < 0){perror("error with recv function 2");exit(1);}
+      if(sent_recv_byte < 15){break;}
+    }
+    }
   else{
-      char okmes[] = "OK\n";
-      sent_recv_bytes = send(socket_t, okmes, sizeof(okmes),0);
-       if(sent_recv_bytes < 0){perror("error with send ");exit(1); }}
-  recvNickname[sent_recv_byte -1] = '\0';
-
+       char okmes[] = "OK\n";
+       sent_recv_bytes = send(socket_t, okmes, sizeof(okmes),0);
+       std::cout << "Name is allowed" << std::endl;
+       if(sent_recv_bytes < 0){perror("error with send ");exit(1);}}
+       recvNickname[sent_recv_byte] = '\0';
   std::string temp(recvNickname);
+  std::vector<std::string> te = split(temp, " ");
+  std::string tem = te[1];
   clientDataStruct *client;
   pthread_mutex_lock(&vect);
   for(int i=0; i< clientDataVector.size(); i++){
@@ -306,10 +326,9 @@ void intialsetup(int socket_t){
       client = clientDataVector[i];
       break;
     }
-  }client->nickName = temp;
+  }client->nickName = tem;
   pthread_mutex_unlock(&vect);  
   clientid++;
-
 }
 
 
@@ -321,6 +340,7 @@ void *sendCallback(void *nothing){
         pthread_cond_wait(&cv,&qu);}//end of if l
     if(!queu.empty()){
        for(int i=0; i < getmax()+1; i++){
+         pthread_mutex_lock(&arr);
         if(clientFD[i] != -1){
           if(clientFD[i] != queu.front()->csocket){
             if(clientFD[i] != mastersocketfd){
@@ -328,6 +348,7 @@ void *sendCallback(void *nothing){
             if(sent_recv_bytes < 0){perror("error with send function");exit(1);}}
           }
         }
+        pthread_mutex_unlock(&arr);
        }
       delete queu.front();
       queu.pop();   
@@ -347,7 +368,7 @@ void printIP(struct sockaddr_in *ipv4){
   const char *result = inet_ntop(AF_INET,&(ipv4->sin_addr),ipv4buffer,sizeof(ipv4buffer));
   if(result == nullptr){
     perror("error with inet_ntop");}
-    std::cout << ipv4buffer << " port " << ipv4->sin_family;
+    std::cout << "Client connected from "<< ipv4buffer << " port " << ipv4->sin_port << std::endl;
     }
 
 
@@ -356,7 +377,7 @@ void printIP(struct sockaddr_in6 *ipv6){
   const char *result = inet_ntop(AF_INET,&(ipv6->sin6_addr),ipv6buffer,sizeof(ipv6buffer));
   if(result == nullptr){
     perror("error with inet_ntop");}
-    std::cout << ipv6buffer << " port " << ipv6->sin6_port;
+    std::cout << "Client connected from " << ipv6buffer << " port " << ipv6->sin6_port << std::endl;
 }
 
 void *cleansocketfun(void *nothing){
@@ -393,6 +414,7 @@ ipv4.sin_addr.s_addr = ((struct sockaddr_in*)temp->ai_addr)->sin_addr.s_addr;
 socketfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
 if(socketfd > 0){
   if(bind(socketfd,(struct sockaddr*)&ipv4,sizeof(struct sockaddr)) < 0){perror("error with binding the ip address");exit(1);}
+  std::cout << "Listening on " << ip << " port " << port << std::endl;
   *ipstatus = 1;
    break;
 }}
@@ -401,9 +423,10 @@ else if(temp->ai_family == AF_INET6){
 ipv6.sin6_family = AF_INET6;
 ipv6.sin6_port = htons(port);
 ipv6.sin6_addr = ((struct sockaddr_in6*)temp->ai_addr)->sin6_addr;
-socketfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+socketfd = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
 if(socketfd > 0){
-  if(bind(socketfd,(struct sockaddr*)&ipv6,sizeof(struct sockaddr_in6)) < 0){perror("error with binding the ip address");exit(1);}
+  if(bind(socketfd,(struct sockaddr*)&ipv6,sizeof(struct sockaddr_in6)) < 0){perror("error with binding the ip address6");exit(1);}
+   std::cout << "Listening on " << ip << " port " << port << std::endl;
   *ipstatus = 2;
    break;
 }}}
@@ -419,26 +442,26 @@ return socketfd;
 }
 
 
-std::vector<std::string> split(std::string sString,std::string delimiter){
+std::vector<std::string> split(std::string sString, std::string delimiter) {
+    std::vector<std::string> nString;
+    std::string temp;
+    int count = 0; 
 
-std::vector<std::string> nString;
-std::string temp;
-
-for(int i=0; i < static_cast<int>(sString.length());i++){
-  int  count = 0;
-  if(sString[i] == delimiter[0]){
-        count++;
-        nString.push_back(temp);
-        temp  = "";
+    for (int i = 0; i < static_cast<int>(sString.length()); i++) {
+        if (sString[i] == delimiter[0]) {
+            count++;
+            nString.push_back(temp);
+            temp = "";
+        } else {
+            temp = temp + sString[i];
+        }
     }
-  else{
-        temp = temp +  sString[i];
-         }
 
-  if(count==0 && (i == static_cast<int>(sString.length()-1))){
-         nString.push_back(temp);}               }
+   
+    if (count == 0 || (count > 0 && temp != "")) {
+        nString.push_back(temp);
+    }
 
-
-
-return nString;
+    return nString;
 }
+
