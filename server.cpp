@@ -23,8 +23,7 @@ typedef struct clientDataStruct{
     int csockefd;
     std::string nickName;
     int ipstatus;
-    struct sockaddr_in ipv4;
-    struct sockaddr_in6 ipv6;
+    struct sockaddr_storage ip;
     int clientid;
 }clientDataStruct;
 
@@ -34,7 +33,6 @@ typedef struct clientSendStruct{
   int csocket;
 }clientSendStruct;
 
-/////////////////////////////////
 
 #define MAXCLIENTCOUNT 50 
 
@@ -92,7 +90,8 @@ void printclientfd(){
   }
   std::cout << std::endl;
 }
-//////////////////////////////////////////
+
+
 pthread_mutex_t vect;
 pthread_mutex_t arr;
 pthread_mutex_t qu;
@@ -176,12 +175,6 @@ else{
 
 int *ipstatus = new int;
 
-struct sockaddr_in clientAddr;
-socklen_t clientlen = sizeof(clientAddr);
-
-struct sockaddr_in6 clientAddr6;
-socklen_t clientlen6 = sizeof(clientAddr6);
-///end of intial
 clearfd();
 mastersocketfd = gsready(ipString ,port, ipstatus);
 setclientfd(mastersocketfd);
@@ -197,19 +190,17 @@ while(1){
     select(getmax() + 1, &readfds, NULL, NULL, NULL);
     if(FD_ISSET(mastersocketfd, &readfds)){
       int *csocketfd = new int;
-      if(*ipstatus == 1){
-      *csocketfd = accept(mastersocketfd, (struct sockaddr*)&clientAddr, &clientlen);
-      printIP(&clientAddr);}
-      else if(*ipstatus == 2){
-      *csocketfd = accept(mastersocketfd, (struct sockaddr*)&clientAddr6, &clientlen6);
-      printIP(&clientAddr6);
-      }
+
+        struct sockaddr_storage clientAddr;
+        socklen_t clientAddrSize = sizeof(clientAddr);
+        *csocketfd = accept(mastersocketfd, (struct sockaddr*)&clientAddr, &clientAddrSize);
+  
       if(*csocketfd < 0){perror("error with accept system call");exit(1);}
       clientDataStruct *client = new clientDataStruct;
       client->clientid = clientid;
       client->csockefd = *csocketfd;
-      if(*ipstatus == 1){client->ipstatus = 1; client->ipv4 = clientAddr;}
-      if(*ipstatus == 2){client->ipstatus = 2; client->ipv6 = clientAddr6;}
+      client->ip = clientAddr;
+      
 
       pthread_mutex_lock(&arr);
       setclientfd(*csocketfd);
@@ -235,8 +226,6 @@ while(1){
       }
 
 }
-
-
   delete ipstatus;
   return 0;
 }
@@ -271,6 +260,7 @@ void *commCallback(void *sock){
     }
     else{
     std::vector<std::string> te = split(recvbuffer, " ");
+    if(recvbuffer[sent_recv_bytes -1] == '\n'){
     if(te[0] != "MSG"){
       char error[] = "ERROR\n";
       int sent_recv_bytes = send(soc,error, sizeof(error),0);
@@ -288,6 +278,7 @@ void *commCallback(void *sock){
     queu.push(data);
     pthread_cond_signal(&cv);
     pthread_mutex_unlock(&qu);}}}
+    }
   return nullptr;
 }
 
@@ -393,47 +384,33 @@ void *cleansocketfun(void *nothing){
 int gsready(std::string &ip, int port,int* ipstatus){
 
 int socketfd; 
-struct sockaddr_in ipv4;
-struct sockaddr_in6 ipv6;
+std::string portStr = std::to_string(port);
 struct addrinfo hint, *output, *temp;
 memset(&hint, 0, sizeof(hint));
 hint.ai_family = AF_UNSPEC;
 hint.ai_socktype = SOCK_STREAM;
-int status = getaddrinfo(ip.c_str(), NULL, &hint, &output);
-if(status != 0){
-std::cout << "There is problem in getting getaddrinfo" << std::endl;
+int status = getaddrinfo(ip.c_str(),portStr.c_str(), &hint, &output);
 
+if(status != 0){
+perror("There is problem in getting getaddrinfo");
+exit(1);
 }
 
+
 for(temp=output; temp != NULL;temp->ai_addr){
+socketfd = socket(temp->ai_family, temp->ai_socktype, temp->ai_protocol);
 
-if(temp->ai_family == AF_INET){
-ipv4.sin_family = AF_INET;
-ipv4.sin_port = htons(port);
-ipv4.sin_addr.s_addr = ((struct sockaddr_in*)temp->ai_addr)->sin_addr.s_addr;
-socketfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-if(socketfd > 0){
-  if(bind(socketfd,(struct sockaddr*)&ipv4,sizeof(struct sockaddr)) < 0){perror("error with binding the ip address");exit(1);}
+if(bind(socketfd,temp->ai_addr,temp->ai_addrlen) < 0){continue;}
+else{
+  if(socketfd > 0){
   std::cout << "Listening on " << ip << " port " << port << std::endl;
-  *ipstatus = 1;
-   break;
-}}
-                                              
-else if(temp->ai_family == AF_INET6){
-ipv6.sin6_family = AF_INET6;
-ipv6.sin6_port = htons(port);
-ipv6.sin6_addr = ((struct sockaddr_in6*)temp->ai_addr)->sin6_addr;
-socketfd = socket(AF_INET6, SOCK_STREAM, IPPROTO_TCP);
-if(socketfd > 0){
-  if(bind(socketfd,(struct sockaddr*)&ipv6,sizeof(struct sockaddr_in6)) < 0){perror("error with binding the ip address6");exit(1);}
-   std::cout << "Listening on " << ip << " port " << port << std::endl;
-  *ipstatus = 2;
-   break;
-}}}
+  break;
+  }
+}
 
-if(*ipstatus != 1 && *ipstatus != 2){
-  perror("error with socket");
-  exit(1);}
+ 
+  }
+   
 
 if(listen(socketfd, 5 < 0)){perror("error with listen function");exit(1);}
   

@@ -190,44 +190,33 @@ return 0;
 }
 
 int gsready(std::string &ip, int port,int* ipstatus, char* buffer){
+
 int socketfd; 
-struct sockaddr_in ipv4;
-struct sockaddr_in6 ipv6;
 struct addrinfo hint, *output, *temp;
 memset(&hint, 0, sizeof(hint));
 hint.ai_family = AF_UNSPEC;
 hint.ai_socktype = SOCK_STREAM;
-int status = getaddrinfo(ip.c_str(), NULL, &hint, &output);
+std::string portStr = std::to_string(port);
+int status = getaddrinfo(ip.c_str(), portStr.c_str(), &hint, &output);
 if(status != 0){
 std::cout << "There is problem in getting getaddrinfo" << std::endl;}
 
 for(temp=output; temp != NULL;temp->ai_addr){
 
-if(temp->ai_family == AF_INET){
-ipv4.sin_family = AF_INET;
-ipv4.sin_port = htons(port);
-ipv4.sin_addr.s_addr = ((struct sockaddr_in*)temp->ai_addr)->sin_addr.s_addr;
-socketfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-if(socketfd > 0){
-   if(connect(socketfd, (struct sockaddr*)&ipv4, sizeof(struct sockaddr)) < 0){perror("error with connect");close(socketfd);fflush(stderr);exit(1);}
-    std::cout << "Connected to " << ip << ":" << port << std::endl;
-  *ipstatus = 1;
-   break;
-}}
-                                              
-else if(temp->ai_family == AF_INET6){
-ipv6.sin6_family = AF_INET6;
-ipv6.sin6_port = htons(port);
-ipv6.sin6_addr = ((struct sockaddr_in6*)temp->ai_addr)->sin6_addr;
-socketfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-if(socketfd > 0){
-   if(connect(socketfd, (struct sockaddr*)&ipv6, sizeof(struct sockaddr_in6)) < 0){perror("error with connect");close(socketfd);fflush(stderr);exit(1);}
-   std::cout << "Connected to " << ip << ":" << port << std::endl;
-  *ipstatus = 2;
-   break;
-}}}
+socketfd = socket(temp->ai_family, temp->ai_socktype, temp->ai_protocol);
 
-if(*ipstatus != 1 && *ipstatus != 2){perror("error with socket");close(socketfd);fflush(stderr);exit(1);}
+if(connect(socketfd,temp->ai_addr,temp->ai_addrlen) < 0){
+    continue;
+}
+else{
+    if(socketfd > 0){
+        std::cout << "Connected to " << ip << ":" << port << std::endl;
+        break;
+    }
+}
+
+}
+
 
 char testmessage[11];
 memset(testmessage, 0, sizeof(testmessage));
